@@ -7,7 +7,19 @@ from django.views import View
 from django.contrib.auth.decorators import login_required
 
 from .forms import RegisterForm, LoginForm, UpdateUserForm, UpdateProfileForm
+from django.shortcuts import render
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import cv2
+import numpy as np
+from PIL import Image
+import torch
+import json
+from datetime import datetime
 
+# Load YOLOv5 model
+model = torch.hub.load('ultralytics/yolov5', 'yolov5m', pretrained=True)
+model.conf = 0.5
 
 def home(request):
     return render(request, 'users/home.html')
@@ -95,3 +107,112 @@ def profile(request):
         profile_form = UpdateProfileForm(instance=request.user.profile)
 
     return render(request, 'users/profile.html', {'user_form': user_form, 'profile_form': profile_form})
+
+@login_required
+
+@csrf_exempt
+def livestream(request):
+    if request.method == 'POST':
+        # Get user-drawn bounding box coordinates, IP address, and screen name from the request
+        bounding_boxes_str = request.POST.get('boxes')
+        ip = request.POST['ip']
+        screen = request.POST['screen']
+        print("Screen: ", screen)
+        print(bounding_boxes_str)
+        
+        # Convert the bounding_boxes string to a dictionary
+        bounding_boxes = json.loads(bounding_boxes_str)
+
+        # Initialize a list to store the detection results
+        detection_results = []
+
+        # Iterate through bounding box coordinates
+        for box in bounding_boxes:
+            # Assign x1, y1, x2, y2 from the current bounding box coordinate
+            x1, y1, x2, y2 = box
+
+            # Open the video stream
+            video_path = f"http://{ip}"
+            detected_list = []
+            box_list = []
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return render(request, 'livestream.html', {'error': 'Error opening video stream!'})
+
+            # Initialize detection flag
+            detected = False
+
+            # Read the frame from the video stream
+            ret, frame = cap.read()
+
+            # Check if a frame is read successfully
+            if not ret:
+                break
+
+            # Crop the frame to the selected bounding box
+            danger_zone = frame[y1:y2, x1:x2]
+
+            # Convert the cropped frame to PIL Image
+            pil_image = Image.fromarray(danger_zone)
+
+            # Perform object detection using YOLOv5
+            results = model(pil_image)
+            labels = results.xyxyn[0].cpu().numpy()[:, -1]
+            classes = model.names[int(labels[0])] if len(labels) > 0 else None
+
+            # Check if a person is detected in the danger zone
+            if classes == 'person':
+                detected = True
+                detected_list.append(detected)
+                box_list.append(box)
+                print("TRUE ===", box, "IP ===", ip)
+                log_detection(ip, screen)  # Call the log_detection() function to store the detection information
+            else:
+                detected_list.append(detected)
+                box_list.append(box)
+                print("FALSE ===", box, "IP ===", ip)
+
+            # Add the detection result to the list
+            detection_results.append({'detected': detected, 'box': box})
+            print(detection_results)
+            print(type(detection_results))
+
+            # Release video capture
+            cap.release()
+
+        results = [{'detected': detected, 'box': box, 'ip': ip} for detected, box in zip(detected_list, box_list)]
+        # Return the detection results as JSON response
+        return JsonResponse({'results': detection_results})
+
+    return render(request, 'users/livestream.html')
+
+
+def log_detection(ip, screen):
+    # Get the current date and time
+    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Format the log entry
+    log_entry = {
+        "timestamp": current_datetime,
+        "Person Detected":True,
+        "ip_address": ip,
+        "screen": screen
+    }
+
+    # Specify the path to the JSON log file
+    log_file_path = "log_file.json"  # Replace with the actual path to your JSON log file
+
+    # Load existing log entries from the file
+    existing_logs = []
+    try:
+        with open(log_file_path, "r") as log_file:
+            existing_logs = json.load(log_file)
+    except FileNotFoundError:
+        pass
+
+    # Append the new log entry to the existing logs
+    existing_logs.append(log_entry)
+
+    # Write the updated log entries to the file
+    with open(log_file_path, "w") as log_file:
+        json.dump(existing_logs, log_file)
