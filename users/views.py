@@ -179,7 +179,7 @@ def livestream(request):
 
             # Release video capture
             cap.release()
-
+ 
         results = [{'detected': detected, 'box': box, 'ip': ip} for detected, box in zip(detected_list, box_list)]
         # Return the detection results as JSON response
         return JsonResponse({'results': detection_results})

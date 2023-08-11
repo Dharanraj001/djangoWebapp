@@ -143,7 +143,7 @@
     <button class="log-out-button" onclick="location.href='{% url 'logout' %}'"><b>Log out</b></button>
     <button class="profile-button" onclick="location.href='{% url 'users-profile' %}'"><b>Profile</b></button>
     <button class="get-started-button" onclick="location.href='{% url 'livestream' %}'"><b>Get Started</b></button>
-{% else %}
+{% else %} 
     <button class="sign-in-button" onclick="location.href='{% url 'login' %}'"><b>Sign in</b></button>
 {% endif %}
 <div class="gif-container">
